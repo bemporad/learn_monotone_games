@@ -23,8 +23,9 @@ Four learned models are compared:
 x is sampled uniformly from [-pi/2, pi/2]^2 and p from [-pi/4, pi/4]^2.  The
 exact unconstrained Nash equilibrium is x*(p) = p.
 
-[1] A. Bemporad and T. Tatarenko, "Learning Parametric Monotone Games,"
-    arXiv preprint, 2026.
+[1] A. Bemporad, T. Tatarenko, "Learning Parametric Monotone Games,"   
+    arXiv preprint 2609.02494, 2026, https://arxiv.org/abs/2609.02494. 
+
 
 (C) 2026 A. Bemporad
 """

@@ -18,8 +18,8 @@ two held-out sets: best-response samples (br_errors, agent-wise) and GNEs
 computed at N_EQUILIBRIA held-out parameter values via nashopt.GNEP
 (EquilibriumSolver), warm-started from the true equilibrium (eq_errors).
 
-[1] A. Bemporad and T. Tatarenko, "Learning Parametric Monotone Games,"
-    arXiv preprint, 2026.
+[1] A. Bemporad, T. Tatarenko, "Learning Parametric Monotone Games,"   
+    arXiv preprint 2609.02494, 2026, https://arxiv.org/abs/2609.02494. 
 
 (C) 2026 A. Bemporad
 """

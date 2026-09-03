@@ -1,8 +1,8 @@
 """Learning parametric monotone games: cost parameterizations, monotonicity
 enforcement, training losses, and equilibrium computation.
 
-[1] A. Bemporad and T. Tatarenko, "Learning Parametric Monotone Games,"
-    arXiv preprint, 2026.
+[1] A. Bemporad, T. Tatarenko, "Learning Parametric Monotone Games,"   
+    arXiv preprint 2609.02494, 2026, https://arxiv.org/abs/2609.02494. 
 
 (C) 2026 A. Bemporad
 """

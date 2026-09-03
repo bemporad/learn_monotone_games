@@ -1,5 +1,8 @@
 """Training orchestration for a CostModel against a DataLoss (paper's eq. learning-problem-point).
 
+[1] A. Bemporad, T. Tatarenko, "Learning Parametric Monotone Games,"   
+    arXiv preprint 2609.02494, 2026, https://arxiv.org/abs/2609.02494. 
+    
 (C) 2026 A. Bemporad
 """
 

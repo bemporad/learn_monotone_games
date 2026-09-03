@@ -38,6 +38,9 @@ optional. When False, X_true/stats_true/the GNE-error metrics and the Part 4b
 pseudogradient diagnostic are all skipped, and only best-response error,
 constraint violation, and cost/value fit R2 are reported.
 
+[1] A. Bemporad, T. Tatarenko, "Learning Parametric Monotone Games,"   
+    arXiv preprint 2609.02494, 2026, https://arxiv.org/abs/2609.02494. 
+    
 (C) 2026 A. Bemporad
 """
 

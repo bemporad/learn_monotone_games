@@ -1,15 +1,24 @@
 """
-Same comparison as example_surrogate_vs_explicit.py, but the TRUE underlying
-game is no longer assumed linear-quadratic: each agent's cost is specified
-generically in JAX through a constructor
+Compare two ways of getting a fast parametric solution p -> x*(p) to a
+random monotone parametric GNEP, whose TRUE cost is specified generically
+in JAX (not assumed linear-quadratic), against the ground-truth GNE:
 
-    fi = agent_cost(i)   # fi(x, p) -> scalar, JAX-jittable
+1. mpfit.NL_GNEP: a neural-network explicit solution p -> x*(p), fit on
+   best-response data obtained by solving each agent's best response via
+   penalty-constrained L-BFGS-B on the raw cost f_i(x,p).
+2. StructuredMonotoneCost (Aq='NN'): a monotone-by-construction surrogate
+   whose pseudogradient matrix C(p), D(p) and offset q(p) are all emitted
+   by a hypernetwork MLP of p, fit on cost samples J_i(x,p) via
+   GameLearner/CostSampleLoss. USE_POTENTIAL_IN_SURROGATE optionally adds
+   a shared input-convex NN potential Psi(x,p) to every agent's cost,
+   which preserves monotonicity but makes the surrogate no longer a
+   quadratic game even at a fixed p, so it must then be solved online with
+   a generic KKT solve instead of a closed-form QP.
 
-agent_cost(i) is the single place where the true game's cost model is
-defined, selected by the COST_TYPE flag below:
-  'quadratic'  : a convex quadratic cost (built from a random monotone
-                 LQ-GNEP, nashopt.lq.generate_random), used to validate the
-                 pipeline against a case with known closed-form structure.
+The true cost f_i(x,p) is defined by agent_cost(i), selected by the
+COST_TYPE flag below:
+  'quadratic'  : a convex quadratic cost, used to validate the pipeline
+                 against a case with known closed-form structure.
   'logsumexp'  : a genuinely nonlinear, non-quadratic cost,
                      f_i(x,p) = log sum_r exp(a_ir^T x_i + b_ir^T x_-i
                                                + gamma_ir^T p)
@@ -20,65 +29,30 @@ Nothing downstream depends on the cost being quadratic; only the Part 2a/4b
 diagnostics (which compare the learned surrogate against the true quadratic
 matrices) require COST_TYPE == 'quadratic' and are skipped otherwise.
 
-Because the true cost is only assumed generic (JAX-differentiable, convex in
-each agent's own block), two parts of the pipeline change from the LQ case:
-1. Best-response and training-data generation go through nashopt.GNEP
-   (parametric=True), computing each agent's best response via penalty-
-   constrained L-BFGS-B on the raw JAX cost fi(x, p) (see
-   best_response_fun/generate_br_data below), instead of a closed-form
-   quadratic solve.
-2. The "ground truth" GNE at a test parameter p is obtained via mpfit's own
-   generic mp.solve_gne(p), which builds a nashopt.GNEP with p baked in and
-   solves its KKT system via least-squares -- valid for any f, quadratic or
-   not -- instead of qp_gnep (LQ-only).
-Solving it at every test p (Part 3) is an expensive nonlinear KKT solve;
-the COMPARE_GNE_GROUND_TRUTH flag makes this optional. When False,
-X_true/stats_true/the GNE-error metrics and the Part 4b pseudogradient
-diagnostic are all skipped, and only best-response error, constraint
-violation, and cost/value fit R2 are reported.
-
-Two ways of getting a fast parametric solution p -> x*(p) are compared
-against this ground truth:
-1. mpfit.NL_GNEP: a neural-network explicit solution p -> x*(p), fit on
-   best-response data generated with the generic solver above.
-2. StructuredMonotoneCost (Aq='NN'): a monotone-by-construction surrogate
-   whose pseudogradient matrix C(p), D(p) and offset q(p) are all emitted
-   by a single hypernetwork MLP of p (see
-   StructuredMonotoneCost.pseudogradient_matrix), fit on cost samples
-   J_i(x,p) via GameLearner/CostSampleLoss. USE_POTENTIAL_IN_SURROGATE
-   optionally adds, on top of that separable quadratic part, a shared
-   input-convex NN potential Psi(x,p;theta_pot) to every agent's cost
-   (StructuredMonotoneCost.potential): jointly convex in x, it contributes
-   an extra grad_x Psi(x,p) term to every agent's pseudogradient without
-   breaking monotonicity (Lemma 4.1/4.2). With the potential on, the
-   surrogate is no longer a quadratic game even at a FIXED p, so it is
-   solved online with the generic nashopt KKT solve (EquilibriumSolver.
-   solve, the same machinery mp.solve_gne uses for the true game) instead
-   of the closed-form path (EquilibriumSolver.solve_quadratic) used when
-   the potential is off -- trading the exact-recovery guarantee of
-   Aq='constant'/potential=None (when agent_cost(i) is itself quadratic)
-   and the closed-form-QP solve speed for more capacity to track a
-   genuinely nonlinear true game.
-
 Both are evaluated on the same test parameters p against:
 
     - best-response error   E[||xhat - BR(xhat)||]  (mean of UNSQUARED
-                             per-sample norms, feasible BRs only, matching
-                             the convention/definition used by the other
-                             examples in example_quad_game.py/
-                             example_nl_internet.py/example_cstr_control.py)
+                             per-sample norms, feasible BRs only)
     - constraint violation  mean/max of the box bounds lb <= x <= ub and of
                              the shared inequalities A_true x <= b_true0 +
-                             S_true@p (m of them, generated by
-                             generate_random, RHS parametrized by S_true)
+                             S_true@p
     - GNE error             ||xhat(p) - x_true(p)||, x_true(p) solving the
-                             TRUE GNEP via mp.solve_gne (nashopt KKT)
+                             TRUE GNEP via a generic KKT least-squares solve
     - cost/value fit R2     on a held-out validation set, using each
                              method's own Stage-1 target: mpfit's value net
                              Jhat_i(x_{-i},p) fits the best-response VALUE
                              min_{x_i} f_i(x,p); the surrogate's cost model
                              fits the raw cost J_i(x,p) directly
 
+Solving the TRUE GNEP at every test p (Part 3) is an expensive nonlinear
+KKT solve; the COMPARE_GNE_GROUND_TRUTH flag makes this optional. When
+False, X_true/stats_true/the GNE-error metrics and the Part 4b
+pseudogradient diagnostic are all skipped, and only best-response error,
+constraint violation, and cost/value fit R2 are reported.
+
+[1] A. Bemporad, T. Tatarenko, "Learning Parametric Monotone Games,"   
+    arXiv preprint 2609.02494, 2026, https://arxiv.org/abs/2609.02494. 
+    
 (C) 2026 A. Bemporad
 """
 

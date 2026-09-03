@@ -1,7 +1,7 @@
 """Penalty terms promoting monotonicity of a CostModel's pseudogradient, as described in [1].
 
-[1] A. Bemporad and T. Tatarenko, "Learning Parametric Monotone Games,"
-    arXiv preprint, 2026.
+[1] A. Bemporad, T. Tatarenko, "Learning Parametric Monotone Games,"   
+    arXiv preprint 2609.02494, 2026, https://arxiv.org/abs/2609.02494. 
 
 (C) 2026 A. Bemporad
 """
