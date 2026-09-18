@@ -175,15 +175,7 @@ class EquilibriumSolver:
 
         gnep = GNEP(sizes=cost_model.dims, f=f, g=g, ng=ng,
                     lb=self.constraints.get('lb'), ub=self.constraints.get('ub'),
-                    parametric=True)
-        # GNEP.__init__ always sets self.npar = 0, regardless of
-        # parametric=True (only its ParametricGNEP subclass -- a different,
-        # design-oriented solve() for optimizing over p -- sets it correctly
-        # in the same way). Setting it here activates the p-aware KKT
-        # residual (kkt_residual_shared/kkt_residual_i) that GNEP already
-        # implements correctly once self.npar is right, without depending on
-        # ParametricGNEP's solve().
-        gnep.npar = npar
+                    parametric=True, npar=npar)
 
         def kkt_residual_p(z, p):
             # z = [x, lam] (the unknowns solved for); p enters as a separate
