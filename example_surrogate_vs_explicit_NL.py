@@ -248,7 +248,7 @@ f = [agent_cost(i) for i in range(N)]
 # g(x,p)<=0 interface (g must take (x,p) since parametric=True); ng=m is 0
 # (g unused) when m==0.
 g_true = (lambda x, p: A_true @ x - (b_true0 + S_true @ p)) if m > 0 else None
-gnep_true = GNEP(sizes=sizes, f=f, g=g_true, ng=m, lb=lb, ub=ub, parametric=True)
+gnep_true = GNEP(sizes=sizes, f=f, g=g_true, ng=m, lb=lb, ub=ub, parametric=True, npar=npar)
 
 
 def best_response_fun(i, x, p):
@@ -452,7 +452,7 @@ def make_f_sur(i):
 f_sur = [make_f_sur(i) for i in range(N)]
 
 g_sur = (lambda x, p: A_true @ x - (b_true0 + S_true @ p)) if m > 0 else None
-gnep_sur = GNEP(sizes=sizes, f=f_sur, g=g_sur, ng=m, lb=lb, ub=ub, parametric=True)
+gnep_sur = GNEP(sizes=sizes, f=f_sur, g=g_sur, ng=m, lb=lb, ub=ub, parametric=True, npar=npar)
 
 
 def best_response_fun_sur(i, x, p):
