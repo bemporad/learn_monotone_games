@@ -49,6 +49,31 @@ class _ExtragradConstraints:
         return self._dg_fn(x, self.p)
 
 
+def _estimate_extragrad_alpha(F_fn, p, x0, nx, safety=0.5, n_samples=20, seed=0):
+    """Estimate a safe Korpelevich extragradient step size alpha = safety/L,
+    L being the max spectral norm of F(.,p)'s (exact, jax-autodiff) Jacobian
+    sampled at x0 plus n_samples-1 random points spread over a region around
+    x0. Mirrors nashopt.nonlinear.nl_extragrad._estimate_alpha: a single
+    finite-difference sample AT x0 (this function's earlier form here, and
+    still extragrad_nlgnep's own pre-fix default) only bounds the LOCAL
+    curvature there, which can badly underestimate the Lipschitz constant
+    relevant over the region the iterates actually traverse when F is
+    genuinely nonlinear in x, giving a step size too large for Korpelevich's
+    convergence guarantee (alpha < 1/L). This remains a finite-sample
+    estimate, not a certified global bound -- solve_extragrad's natural-map
+    residual check is what actually certifies status_str="converged" means a
+    genuine VI solution, independent of this estimate's quality."""
+    F_of_x = jax.jit(lambda x: F_fn(x, p))
+    JF = jax.jacobian(F_of_x)
+    rng = np.random.default_rng(seed)
+    radius = 10.0 * max(np.linalg.norm(x0), 1.0)
+    x0j = jnp.asarray(x0, dtype=jnp.float64)
+    points = [x0j] + [x0j + radius * jnp.asarray(rng.standard_normal(nx))
+                       for _ in range(n_samples - 1)]
+    L = max(float(jnp.linalg.norm(JF(pt), 2)) for pt in points)
+    return safety / max(L, 1e-12)
+
+
 class EquilibriumSolver:
     """monotone_games' parametric-GNEP wrapper around a fitted CostModel:
     construct ONCE per (cost_model, constraints) -- e.g. right after
@@ -484,8 +509,8 @@ class EquilibriumSolver:
         ex.proj_kind = kind
         return ex.proj_y, ex.proj_x
 
-    def solve_extragrad(self, p, theta, x0=None, alpha=None, tol=1e-8, maxiter=1000,
-                        projection_solver='ipopt', rho=1e5, verbose=0):
+    def solve_extragrad(self, p, theta, x0=None, alpha=None, alpha_safety=0.5, tol=1e-8,
+                        maxiter=1000, projection_solver='ipopt', rho=1e5, verbose=0):
         """Solve for x*(p): the variational GNE of cost_model.costs(.,.,theta)
         under the constraints set at construction, via Korpelevich's
         extragradient method
@@ -509,13 +534,26 @@ class EquilibriumSolver:
             p: parameter vector.
             theta: cost-model parameters (e.g. the fit result's theta).
             x0: initial point (default: zeros).
-            alpha: step size. If None, estimated as 0.99/L, with L the
-                Lipschitz constant of F approximated by a single finite-
-                difference ratio (as extragrad_nlgnep's own default) -- pass
-                e.g. 0.99/cost_model.lipschitz_constant(theta, p) (paper's
+            alpha: step size. If None, estimated via _estimate_extragrad_alpha
+                (see its docstring) as alpha_safety/L, L being the max
+                spectral norm of F(.,p)'s Jacobian sampled over several
+                points around x0 -- pass e.g.
+                0.99/cost_model.lipschitz_constant(theta, p) (paper's
                 Proposition 4.2) for a bound-based, cost-free-of-extra-
                 F-evaluations alternative.
-            tol: stop when ||x^{k+1}-x^k||_inf < tol.
+            alpha_safety: safety factor applied to the automatic alpha
+                estimate above (ignored if alpha is given directly). Default
+                0.5, well under the 1/L theoretical threshold to leave margin
+                for L being a finite-sample estimate rather than a certified
+                global bound.
+            tol: stop when both ||x^{k+1}-x^k||_inf < tol AND the natural-map
+                residual ||x^k-y^k||_inf < tol, y^k = P_X(x^k-alpha*F(x^k))
+                being the extragradient half-step already computed each
+                iteration. The residual term is what actually certifies x^k
+                solves the VI (it vanishes there for any alpha > 0, unlike
+                the step norm alone, which can also vanish at a fixed point
+                of the two-step map that is NOT a VI solution if alpha
+                exceeds Korpelevich's convergence threshold).
             maxiter: maximum number of extragradient iterations.
             projection_solver: 'ipopt' (default, requires cyipopt) or 'trf'
                 (scipy.optimize.least_squares, box bounds hard, other
@@ -538,12 +576,7 @@ class EquilibriumSolver:
             return np.asarray(ex.F_fn(jnp.asarray(x_np), p))
 
         if alpha is None:
-            rng = np.random.default_rng(0)
-            eps = 1e-4 * max(np.linalg.norm(x0_np), 1.0)
-            xb = x0_np + eps * rng.standard_normal(nx)
-            Fa, Fb = F_np(x0_np), F_np(xb)
-            L = np.linalg.norm(Fa - Fb) / max(np.linalg.norm(x0_np - xb), 1e-15)
-            alpha = 0.99 / max(L, 1e-12)
+            alpha = _estimate_extragrad_alpha(ex.F_fn, p, x0_np, nx, safety=alpha_safety)
 
         proj_y, proj_x = self._extragrad_projectors(projection_solver, rho)
         ex.facade.p = p
@@ -552,6 +585,7 @@ class EquilibriumSolver:
         t_start = time.perf_counter()
         status_str = "max_iterations_reached"
         err = np.nan
+        nat_residual = np.nan
         k = -1
         for k in range(maxiter):
             Fx = F_np(x)
@@ -560,11 +594,17 @@ class EquilibriumSolver:
             x_new = proj_x.project(x - alpha * Fy)
 
             err = np.linalg.norm(x_new - x, np.inf)
+            # natural-map residual at x (BEFORE the update): x solves the VI
+            # iff this is zero, for any alpha > 0 -- unlike err above, which
+            # can also vanish at a spurious fixed point of the two-step map
+            # when alpha exceeds Korpelevich's convergence threshold.
+            nat_residual = np.linalg.norm(x - y, np.inf)
             x = x_new
 
             if verbose:
-                print(f"  extragrad iter {k + 1}: ||dx||_inf={err:.3e}")
-            if err < tol:
+                print(f"  extragrad iter {k + 1}: ||dx||_inf={err:.3e}, "
+                      f"natural residual={nat_residual:.3e}")
+            if err < tol and nat_residual < tol:
                 status_str = "converged"
                 break
         elapsed = time.perf_counter() - t_start
@@ -578,6 +618,7 @@ class EquilibriumSolver:
 
         stats = SimpleNamespace(solver="extragrad", kkt_evals=k + 1,
                                 elapsed_time=elapsed, status_str=status_str,
-                                info={"converged": converged, "final_err": float(err)})
+                                info={"converged": converged, "final_err": float(err),
+                                      "final_nat_residual": float(nat_residual)})
         return SimpleNamespace(x=x, res=np.atleast_1d(np.asarray(err)), lam=[],
                                stats=stats, norm_residual=float(err))
